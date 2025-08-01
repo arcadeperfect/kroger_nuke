@@ -1,0 +1,33 @@
+# import nuke
+
+
+# def kroger_write_node(sub_write_node_generator):
+
+#     source_node = nuke.selectedNode()
+#     krogerWrite = nuke.createNode("Group")
+#     krogerWrite['name'].setValue("kroger write")
+
+#     with krogerWrite:
+        
+#         source_node = nuke.createNode("Input")
+#         init_position = [int(source_node['xpos'].getValue()), int(source_node['ypos'].getValue())]
+#         xOffset = 100
+#         yOffset = 100
+#         init_position[1] += yOffset 
+#         excludes = ['Main']
+        
+#         for view in nuke.views():
+        
+#             if view.lower() in [v.lower() for v in excludes]:
+#                 continue
+        
+#             writeNode = sub_write_node_generator(view, inpanel = False)
+#             view_name_knob = nuke.String_Knob("view_name_knob", "Render View")
+#             view_name_knob.setValue(view)
+#             writeNode.addKnob(view_name_knob) 
+#             writeNode.setInput(0, source_node)
+#             writeNode.setXYpos(init_position[0], init_position[1])
+#             init_position[0] += yOffset
+#             writeNode.hideControlPanel()
+
+    
