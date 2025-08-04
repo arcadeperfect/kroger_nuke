@@ -1,6 +1,7 @@
 import nuke
 import ast
 
+
 from PySide2 import QtWidgets, QtCore  # type: ignore
 
 
@@ -433,8 +434,9 @@ class Render_submission_dialog(QtWidgets.QDialog):
                 # Create a mapping of view names to nodes
                 view_to_node = {}
                 for node in generated_nodes:
-                    if node.knob("view_name_knob"):
-                        view_name = node["view_name_knob"].getValue()
+                    view_name_knob = node.knob("view_name_knob")
+                    if view_name_knob:
+                        view_name = view_name_knob.getValue()
                         view_to_node[view_name] = node
                         print(f"  mapped view '{view_name}' to node {node.name()}")
                     else:
@@ -562,6 +564,193 @@ class Render_submission_dialog(QtWidgets.QDialog):
             # If No, do nothing and keep dialog open
 
 
+class Batch_publish_dialog(QtWidgets.QDialog):
+    def __init__(self, parent=None, kroger_node=None):
+        super().__init__(parent)
+        self.kroger_node = kroger_node
+        self.setup_ui()
+        self.populate_view_table()
+
+    def setup_ui(self):
+        self.setWindowTitle("Batch Publish")
+        self.setMinimumSize(400, 300)
+        self.resize(500, 400)
+
+        
+        layout = QtWidgets.QVBoxLayout(self)
+
+        
+        table_group = QtWidgets.QGroupBox("Select Views to Publish")
+        table_layout = QtWidgets.QVBoxLayout(table_group)
+
+   
+        selection_buttons = QtWidgets.QHBoxLayout()
+
+        self.select_all_btn = QtWidgets.QPushButton("Select All")
+        self.select_all_btn.clicked.connect(self.select_all_views)
+        selection_buttons.addWidget(self.select_all_btn)
+
+        self.select_none_btn = QtWidgets.QPushButton("Select None")
+        self.select_none_btn.clicked.connect(self.select_none_views)
+        selection_buttons.addWidget(self.select_none_btn)
+
+        selection_buttons.addStretch()
+        table_layout.addLayout(selection_buttons)
+
+
+        self.view_table = QtWidgets.QTableWidget()
+        self.view_table.setColumnCount(2)
+        self.view_table.setHorizontalHeaderLabels(["View Name", "Publish"])
+
+
+        self.view_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.view_table.setAlternatingRowColors(True)
+        self.view_table.verticalHeader().setVisible(False)
+
+
+        header = self.view_table.horizontalHeader()
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)  # View Name
+        header.setSectionResizeMode(
+            1, QtWidgets.QHeaderView.ResizeToContents
+        )  # Publish checkbox
+
+        table_layout.addWidget(self.view_table)
+        layout.addWidget(table_group)
+
+
+        warning_label = QtWidgets.QLabel(
+            "Warning: Submitting a large number of publishes can take several minutes"
+        )
+        warning_label.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(warning_label)
+
+        warning_label2 = QtWidgets.QLabel("If you get failures check the external nuke shell window for errors.\nIf you try to publish a version that already exixts, it will fail.")
+        warning_label2.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(warning_label2)
+
+
+        button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
+
+        publish_button = button_box.button(QtWidgets.QDialogButtonBox.Ok)
+        publish_button.setText("Publish")
+
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def populate_view_table(self):
+        """Populate the table with available views from kroger write nodes"""
+        if not self.kroger_node:
+            return
+
+        views = []
+        try:
+            # Get views from the generated nodes inside the kroger write group
+            with self.kroger_node:
+                all_nodes = nuke.allNodes()
+                generated_nodes = [
+                    node
+                    for node in all_nodes
+                    if node.Class() != "Input" and node.knob("view_name_knob")
+                ]
+
+                for node in generated_nodes:
+                    view_name_knob = node.knob("view_name_knob")
+                    if view_name_knob:
+                        view_name = view_name_knob.getValue()
+                        if view_name not in views:
+                            views.append(view_name)
+        except Exception as e:
+            print(f"Error getting views: {e}")
+            return
+
+        self.view_table.setRowCount(len(views))
+
+        for row, view_name in enumerate(views):
+            # Column 0: View Name (read-only)
+            name_item = QtWidgets.QTableWidgetItem(view_name)
+            name_item.setFlags(name_item.flags() & ~QtCore.Qt.ItemIsEditable)
+            self.view_table.setItem(row, 0, name_item)
+
+            # Column 1: Publish checkbox
+            checkbox = QtWidgets.QCheckBox()
+            # Default all views to checked
+            checkbox.setChecked(True)
+
+            # Center the checkbox in the cell
+            checkbox_widget = QtWidgets.QWidget()
+            checkbox_layout = QtWidgets.QHBoxLayout(checkbox_widget)
+            checkbox_layout.addWidget(checkbox)
+            checkbox_layout.setAlignment(QtCore.Qt.AlignCenter)
+            checkbox_layout.setContentsMargins(0, 0, 0, 0)
+
+            self.view_table.setCellWidget(row, 1, checkbox_widget)
+
+
+        self.view_table.resizeRowsToContents()
+
+    def get_checkbox_from_row(self, row):
+        """Get the checkbox widget from a specific row"""
+        checkbox_widget = self.view_table.cellWidget(row, 1)
+        if checkbox_widget:
+            return checkbox_widget.layout().itemAt(0).widget()
+        return None
+
+    def select_all_views(self):
+        """Check all publish checkboxes"""
+        for row in range(self.view_table.rowCount()):
+            checkbox = self.get_checkbox_from_row(row)
+            if checkbox:
+                checkbox.setChecked(True)
+
+    def select_none_views(self):
+        """Uncheck all publish checkboxes"""
+        for row in range(self.view_table.rowCount()):
+            checkbox = self.get_checkbox_from_row(row)
+            if checkbox:
+                checkbox.setChecked(False)
+
+    def get_selected_views(self):
+        """Get list of selected view names"""
+        selected_views = []
+        for row in range(self.view_table.rowCount()):
+            view_name = self.view_table.item(row, 0).text()
+            checkbox = self.get_checkbox_from_row(row)
+            if checkbox and checkbox.isChecked():
+                selected_views.append(view_name)
+        return selected_views
+
+    def validate_data(self):
+        """Validate that at least one view is selected"""
+        selected_views = self.get_selected_views()
+        if not selected_views:
+            QtWidgets.QMessageBox.warning(
+                self, "Validation Error", "Please select at least one view to publish."
+            )
+            return False
+        return True
+
+    def accept(self):
+        """Override accept to validate and confirm before closing"""
+        if self.validate_data():
+            selected_views = self.get_selected_views()
+            num_views = len(selected_views)
+
+            # Show confirmation dialog
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Confirm Batch Publish",
+                f"About to batch publish {num_views} view{'s' if num_views != 1 else ''}, continue?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No,  # Default to No for safety
+            )
+
+            if reply == QtWidgets.QMessageBox.Yes:
+                super().accept()
+
+
 def load_saved_data_from_node(kroger_node=None):
     """Load saved data from the node's hidden knob"""
     try:
@@ -588,10 +777,10 @@ def save_data_to_node(data, kroger_node=None):
 
 def submit_button_callback():
     """Callback function for the button"""
-    # Get reference to the current kroger write node
+    
     kroger_node = nuke.thisNode()
 
-    # Load any previously saved data
+    
     saved_data = load_saved_data_from_node(kroger_node)
 
     dialog = Render_submission_dialog(saved_data=saved_data, kroger_node=kroger_node)
@@ -601,17 +790,36 @@ def submit_button_callback():
         print("Dialog accepted with data:")
         print(data)
 
-        # Save the data to the node
+    
         save_data_to_node(data, kroger_node)
 
-        # Submit the renders
+    
         submit_renders(data, kroger_node)
 
     else:
         print("Dialog cancelled")
-        # Still save current state even if cancelled
+        
         data = dialog.get_selected_data()
         save_data_to_node(data, kroger_node)
+
+
+def batch_publish_button_callback():
+    """Callback function for the batch publish button"""
+    
+    kroger_node = nuke.thisNode()
+    # print(kroger_node.name())
+
+    dialog = Batch_publish_dialog(kroger_node=kroger_node)
+
+    if dialog.exec_() == QtWidgets.QDialog.Accepted:
+        selected_views = dialog.get_selected_views()
+        print(f"Batch publishing selected views: {selected_views}")
+        print(kroger_node.name())
+
+        
+        batch_publish(selected_views=selected_views, kroger_node=kroger_node)
+    else:
+        print("Batch publish dialog cancelled")
 
 
 def submit_renders(data, krogerWrite):
@@ -621,7 +829,6 @@ def submit_renders(data, krogerWrite):
     from datetime import datetime
 
     try:
-        # Import the deadline utils - adjust import as needed for your setup
         import hornet_deadline_utils
     except ImportError:
         nuke.message("Error: hornet_deadline_utils module not found!")
@@ -641,7 +848,7 @@ def submit_renders(data, krogerWrite):
     now = datetime.now().strftime("%H-%M-%S")
     batch_name = f"{script}_{now}"
 
-    # Find the generated nodes inside the kroger write group
+
     with krogerWrite:
         all_nodes = nuke.allNodes()
         generated_nodes = [
@@ -654,16 +861,18 @@ def submit_renders(data, krogerWrite):
             nuke.message("No generated nodes found in kroger write group!")
             return
 
-        # Create a mapping of view names to nodes
+        
         view_to_node = {}
         for node in generated_nodes:
-            view_name = node["view_name_knob"].getValue()
-            view_to_node[view_name] = node
+            view_name_knob = node.knob("view_name_knob")
+            if view_name_knob:
+                view_name = view_name_knob.getValue()
+                view_to_node[view_name] = node
 
         print("View to node mapping:")
         print(view_to_node)
 
-    # Submit each selected view
+    
     for view_name in selected_views:
         if view_name not in view_to_node:
             print(f"Warning: No node found for view '{view_name}', skipping...")
@@ -673,7 +882,7 @@ def submit_renders(data, krogerWrite):
         node = view_to_node[view_name]
         print(node.fullName())
         try:
-            # Submit using the node's context
+            
             with node.begin():
                 hornet_deadline_utils.deadlineNetworkSubmit(
                     # deadlineNetworkSubmit(
@@ -707,33 +916,34 @@ def submit_renders(data, krogerWrite):
 
 def update_write_nodes_list(kroger_node=None):
     """Update the list of write nodes and their views in the properties panel"""
-    try:
-        # Use passed node or try to get current node
+    try:    
         krogerWrite = kroger_node if kroger_node else nuke.thisNode()
         views_list = []
 
-        # Get all nodes inside the group (excluding Input nodes)
+        
         with krogerWrite:
             all_nodes = nuke.allNodes()
-            # Filter out Input nodes - everything else should be from the generator
+        
             generated_nodes = [node for node in all_nodes if node.Class() != "Input"]
 
             for generated_node in generated_nodes:
-                # Get the view from the custom knob if it exists
-                if generated_node.knob("view_name_knob"):
-                    view_name = generated_node["view_name_knob"].getValue()
+        
+                view_name_knob = generated_node.knob("view_name_knob")
+                if view_name_knob:
+                    view_name = view_name_knob.getValue()
                     views_list.append(view_name)
 
-        # Update the multiline text knob with the list
-        if krogerWrite.knob("write_nodes_list"):
+        
+        write_nodes_list_knob = krogerWrite.knob("write_nodes_list")
+        if write_nodes_list_knob:
             if views_list:
-                # Add some extra spacing to make the field appear taller
+        
                 list_text = "\n".join(views_list)
-                # Pad with extra newlines to make it visually taller
+        
                 list_text += "\n\n\n"
-                krogerWrite["write_nodes_list"].setValue(list_text)
+                write_nodes_list_knob.setValue(list_text)
             else:
-                krogerWrite["write_nodes_list"].setValue("No views found\n\n\n")
+                write_nodes_list_knob.setValue("No views found\n\n\n")
 
     except Exception as e:
         print(f"Error updating write nodes list: {e}")
@@ -746,7 +956,7 @@ def regenerate_write_nodes():
         print("regenerating write nodes...")
 
         with krogerWrite:
-            # Find and delete all generated nodes (but keep Input node)
+        
             all_nodes = nuke.allNodes()
             generated_nodes = [node for node in all_nodes if node.Class() != "Input"]
             print(f"deleting {len(generated_nodes)} existing nodes...")
@@ -754,15 +964,15 @@ def regenerate_write_nodes():
             for generated_node in generated_nodes:
                 nuke.delete(generated_node)
 
-        # Import quick_write to get the default generator
+        
         import quick_write
 
         sub_write_node_generator = quick_write._quick_write_node
 
-        # Recreate nodes with current views and aspect
+        
         create_write_nodes_for_views(krogerWrite, sub_write_node_generator)
 
-        # Update the views list display
+        
         update_write_nodes_list(krogerWrite)
         print("nodes regenerated successfully")
 
@@ -773,7 +983,7 @@ def regenerate_write_nodes():
 def create_write_nodes_for_views(krogerWrite, sub_write_node_generator):
     """Create generated nodes for all current views"""
     with krogerWrite:
-        # Find the Input node
+
         input_nodes = [node for node in nuke.allNodes() if node.Class() == "Input"]
         if not input_nodes:
             print("Warning: No Input node found")
@@ -788,19 +998,19 @@ def create_write_nodes_for_views(krogerWrite, sub_write_node_generator):
         yOffset = 100
         init_position[1] += yOffset
 
-        # Get aspect value from the kroger write node
+
         aspect_value = ""
         if krogerWrite.knob("aspect"):
             aspect_value = krogerWrite["aspect"].getValue().strip()
-            # Replace spaces with underscores, ignore if all spaces
+
             if aspect_value and not aspect_value.isspace():
                 aspect_value = aspect_value.replace(" ", "_")
             else:
                 aspect_value = ""
 
-                # Create nodes for ALL views (including main)
+
         for view in nuke.views():
-            # Create variant name with aspect appended
+
             if aspect_value:
                 variant_name = f"{view}_{aspect_value}"
                 print(
@@ -810,20 +1020,19 @@ def create_write_nodes_for_views(krogerWrite, sub_write_node_generator):
                 variant_name = view
                 print(f"creating node for view '{view}' (no aspect)")
 
-            # Create OneView node for this view
+
             oneview = nuke.createNode("OneView", inpanel=False)
             oneview["view"].setValue(view)
             oneview.setInput(0, source_node)
             oneview.setXYpos(init_position[0], init_position[1])
             oneview.hideControlPanel()
 
-            # Move position for the next node
             init_position[1] += yOffset
 
-            # The generator returns a group (not necessarily a Write node)
+
             generated_node = sub_write_node_generator(variant_name, inpanel=False)
 
-            # Set the view on the quick_write node
+
             if generated_node.knob("views"):
                 generated_node["views"].setValue(view)
                 print(f"  set quick_write views to '{view}'")
@@ -855,39 +1064,44 @@ def kroger_write_node(sub_write_node_generator=None):
     aspect_knob.setValue("16x9")  # Default aspect ratio
     krogerWrite.addKnob(aspect_knob)
 
-    # Add a divider for organization
+
     divider1 = nuke.Text_Knob("divider1", "")
     krogerWrite.addKnob(divider1)
 
-    # Add a refresh button above the views list
+
     regenerate_knob = nuke.PyScript_Knob("regenerate_writes", "refresh nodes")
     regenerate_knob.setValue("kroger_write.regenerate_write_nodes()")
     krogerWrite.addKnob(regenerate_knob)
 
-    # Add a multiline text knob to display views - make it taller by using more lines
+
     write_nodes_knob = nuke.Multiline_Eval_String_Knob("write_nodes_list", "Views")
     write_nodes_knob.setFlag(nuke.READ_ONLY)
     krogerWrite.addKnob(write_nodes_knob)
 
-    # Add a small divider to force the submit button on a new line
+
     divider_submit = nuke.Text_Knob("divider_submit", "")
     krogerWrite.addKnob(divider_submit)
 
-    # Add submit button below the views list
+
     button_knob = nuke.PyScript_Knob("render_dialog_button", "Configure and Submit")
     button_knob.setValue("kroger_write.submit_button_callback()")
     krogerWrite.addKnob(button_knob)
 
-    # Add another divider
+
+    batch_publish_knob = nuke.PyScript_Knob("batch_publish_button", "Batch Publish")
+    batch_publish_knob.setValue("kroger_write.batch_publish_button_callback()")
+    krogerWrite.addKnob(batch_publish_knob)
+
+
     divider2 = nuke.Text_Knob("divider2", "")
     krogerWrite.addKnob(divider2)
 
-    # Add a hidden knob to store dialog data
+
     data_knob = nuke.String_Knob("dialog_data", "Dialog Data")
     data_knob.setVisible(False)
     krogerWrite.addKnob(data_knob)
 
-    # Create the input node first
+
     with krogerWrite:
         source_node = nuke.createNode("Input", inpanel=False)
 
@@ -897,7 +1111,125 @@ def kroger_write_node(sub_write_node_generator=None):
     # Auto-populate the write nodes list on creation
     update_write_nodes_list(krogerWrite)
 
-    # Set the properties panel to show the group node, not the internal Input
+
     krogerWrite.showControlPanel()
 
     return krogerWrite
+
+
+"""
+        Args:
+        write_nodes (list): List of nuke write group nodes to publish
+        delay (float): Seconds to wait between publishes
+        review (bool): Whether to generate review media at all
+        review_farm (bool): Whether to generate review media on farm (True) or locally (False)
+        integrate_farm (bool): Whether to use farm integration ("frames_farm") or local ("frames")
+        burnin (bool): Whether to include burnins in review media
+        silent (bool): Suppress individual success/failure popup messages (batch summary still shown)
+"""
+
+
+def batch_publish(
+    selected_views=None,
+    review=True,
+    review_farm=True,
+    integrate_farm=True,
+    burnin=True,
+    silent=True,
+    kroger_node=None,
+):
+    try:
+        import hornet_publish_utils  # noqa: F401
+
+        print("[OK] Successfully imported hornet_publish_utils")
+    except ImportError as e:
+        error_msg = f"[ERROR] Error importing hornet_publish_utils: {e}"
+        print(error_msg)
+        nuke.message(error_msg)
+        return
+
+    try:
+        # Get the current node
+        krogerWrite = kroger_node if kroger_node else nuke.thisNode()
+        print(f"Using kroger node: {krogerWrite.name()}")
+
+        publis_nodes = []
+        print(f"Looking for publish nodes in {krogerWrite.name()}...")
+        print(f"Selected views filter: {selected_views}")
+
+        with krogerWrite.begin():
+            nodes = nuke.allNodes("Group")
+            print(f"Found {len(nodes)} Group nodes inside kroger write")
+
+            for node in nodes:
+                node_name = node.name()
+                print(f"  Checking node: {node_name}")
+
+                # Check for required knobs
+                has_publish_instance = "publish_instance" in node.knobs().keys()
+                has_quick_publish = "quick_publish" in node.knobs().keys()
+                print(
+                    f"    publish_instance: {has_publish_instance}, quick_publish: {has_quick_publish}"
+                )
+
+                if not (has_publish_instance and has_quick_publish):
+                    print(f"    [SKIP] Skipping {node_name} - missing required knobs")
+                    continue
+
+                # Check view filter
+                if selected_views:
+                    view_name_knob = node.knob("view_name_knob")
+                    if view_name_knob:
+                        view_name = view_name_knob.getValue()
+                        print(f"    Node view: '{view_name}'")
+                        if view_name not in selected_views:
+                            print(
+                                f"    [SKIP] Skipping {node_name} - view '{view_name}' not in selected views"
+                            )
+                            continue
+                    else:
+                        print(f"    [WARN] Node {node_name} has no view_name_knob")
+
+                publis_nodes.append(node)
+                print(f"    [OK] Added {node_name} to publish list")
+
+        print(f"Final publish list: {len(publis_nodes)} nodes")
+        for i, node in enumerate(publis_nodes):
+            view_knob = node.knob("view_name_knob")
+            view_name = view_knob.getValue() if view_knob else "unknown"
+            print(f"  {i + 1}. {node.name()} (view: {view_name})")
+
+        if not publis_nodes:
+            error_msg = "[ERROR] No publish nodes found matching criteria"
+            print(error_msg)
+            nuke.message(error_msg)
+            return
+
+        print("Starting batch publish with hornet_publish_utils...")
+        print(
+            f"   Parameters: review={review}, review_farm={review_farm}, integrate_farm={integrate_farm}"
+        )
+        print(f"   Parameters: burnin={burnin}, silent={silent}")
+
+        hornet_publish_utils.batch_publish_write_nodes(
+            publis_nodes,
+            delay=0.25,
+            review=review,
+            review_farm=review_farm,
+            integrate_farm=integrate_farm,
+            burnin=burnin,
+            silent=silent,
+        )
+
+        print("[OK] Batch publish completed successfully")
+
+    except Exception as e:
+        error_msg = f"[ERROR] Batch publish error: {str(e)}"
+        print(error_msg)
+        print(f"   Error type: {type(e).__name__}")
+        import traceback
+
+        print("   Full traceback:")
+        traceback.print_exc()
+        nuke.message(error_msg)
+        return
